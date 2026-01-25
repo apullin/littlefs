@@ -22,6 +22,7 @@ add_executable(lfs_tests
     test_truncate.cpp
     test_move.cpp
     test_paths.cpp
+    test_interspersed.cpp
 )
 
 target_link_libraries(lfs_tests
