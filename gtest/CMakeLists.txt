@@ -27,6 +27,8 @@ add_executable(lfs_tests
     test_entries.cpp
     test_orphans.cpp
     test_relocations.cpp
+    test_badblocks.cpp
+    test_exhaustion.cpp
 )
 
 target_link_libraries(lfs_tests
