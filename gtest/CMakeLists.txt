@@ -19,6 +19,8 @@ add_executable(lfs_tests
     test_dirs.cpp
     test_seek.cpp
     test_attrs.cpp
+    test_truncate.cpp
+    test_move.cpp
 )
 
 target_link_libraries(lfs_tests
