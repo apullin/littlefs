@@ -2,6 +2,7 @@
 #define LFS_TEST_MACROS_H
 
 #include <gtest/gtest.h>
+#include <cstdint>
 
 // Assertion macros to replace the TOML "=>" syntax
 // Example: lfs_mount(&lfs, cfg) => 0  becomes  LFS_ASSERT_OK(lfs_mount(&lfs_, &cfg_))
@@ -49,5 +50,22 @@
 // For checking LFS error codes
 #define LFS_ASSERT_ERR(expr, err) LFS_ASSERT_EQ(expr, err)
 #define LFS_EXPECT_ERR(expr, err) LFS_EXPECT_EQ(expr, err)
+
+// PRNG for generating test data - matches the test framework's TEST_PRNG
+inline uint32_t lfs_test_prng(uint32_t *state) {
+    *state = *state * 1103515245 + 12345;
+    return *state;
+}
+
+#define TEST_PRNG(state) lfs_test_prng(state)
+
+// Min/max utilities
+#ifndef lfs_min
+#define lfs_min(a, b) ((a) < (b) ? (a) : (b))
+#endif
+
+#ifndef lfs_max
+#define lfs_max(a, b) ((a) > (b) ? (a) : (b))
+#endif
 
 #endif // LFS_TEST_MACROS_H

@@ -14,6 +14,11 @@ FetchContent_MakeAvailable(googletest)
 add_executable(lfs_tests
     lfs_test_fixture.cpp
     test_bd.cpp
+    test_superblocks.cpp
+    test_files.cpp
+    test_dirs.cpp
+    test_seek.cpp
+    test_attrs.cpp
 )
 
 target_link_libraries(lfs_tests

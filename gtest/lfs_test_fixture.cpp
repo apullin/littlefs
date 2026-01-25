@@ -1,4 +1,5 @@
 #include "lfs_test_fixture.h"
+#include <algorithm>
 #include <cstring>
 
 void LfsTestFixture::SetGeometry(const LfsGeometry& geom) {
@@ -31,7 +32,8 @@ void LfsTestFixture::SetUp() {
     cfg_.block_size = geometry_.erase_size;
     cfg_.block_count = geometry_.erase_count;
     cfg_.block_cycles = block_cycles_;
-    cfg_.cache_size = cache_size_;
+    // Cache size must be at least read_size and prog_size
+    cfg_.cache_size = std::max({cache_size_, geometry_.read_size, geometry_.prog_size});
     cfg_.lookahead_size = lookahead_size_;
 
     int err = lfs_emubd_create(&cfg_, &bdcfg_);
