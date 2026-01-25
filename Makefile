@@ -31,23 +31,6 @@ ASM  := $(SRC:%.c=$(BUILDDIR)/%.s)
 CI   := $(SRC:%.c=$(BUILDDIR)/%.ci)
 GCDA := $(SRC:%.c=$(BUILDDIR)/%.t.gcda)
 
-TESTS ?= $(wildcard tests/*.toml)
-TEST_SRC ?= $(SRC) \
-		$(filter-out $(wildcard bd/*.t.* bd/*.b.*),$(wildcard bd/*.c)) \
-		runners/test_runner.c
-TEST_RUNNER ?= $(BUILDDIR)/runners/test_runner
-TEST_A     := $(TESTS:%.toml=$(BUILDDIR)/%.t.a.c) \
-		$(TEST_SRC:%.c=$(BUILDDIR)/%.t.a.c)
-TEST_C     := $(TEST_A:%.t.a.c=%.t.c)
-TEST_OBJ   := $(TEST_C:%.t.c=%.t.o)
-TEST_DEP   := $(TEST_C:%.t.c=%.t.d)
-TEST_CI	   := $(TEST_C:%.t.c=%.t.ci)
-TEST_GCNO  := $(TEST_C:%.t.c=%.t.gcno)
-TEST_GCDA  := $(TEST_C:%.t.c=%.t.gcda)
-TEST_PERF  := $(TEST_RUNNER:%=%.perf)
-TEST_TRACE := $(TEST_RUNNER:%=%.trace)
-TEST_CSV   := $(TEST_RUNNER:%=%.csv)
-
 BENCHES ?= $(wildcard benches/*.toml)
 BENCH_SRC ?= $(SRC) \
 		$(filter-out $(wildcard bd/*.t.* bd/*.b.*),$(wildcard bd/*.c)) \
@@ -119,47 +102,32 @@ ifneq ($(PERF),perf)
 PERFFLAGS += --perf-path="$(PERF)"
 endif
 
-TESTFLAGS  += -b
 BENCHFLAGS += -b
 # forward -j flag
-TESTFLAGS  += $(filter -j%,$(MAKEFLAGS))
 BENCHFLAGS += $(filter -j%,$(MAKEFLAGS))
 ifdef YES_PERF
-TESTFLAGS  += -p $(TEST_PERF)
 BENCHFLAGS += -p $(BENCH_PERF)
-endif
-ifdef YES_PERFBD
-TESTFLAGS += -t $(TEST_TRACE) --trace-backtrace --trace-freq=100
 endif
 ifndef NO_PERFBD
 BENCHFLAGS += -t $(BENCH_TRACE) --trace-backtrace --trace-freq=100
-endif
-ifdef YES_TESTMARKS
-TESTFLAGS += -o $(TEST_CSV)
 endif
 ifndef NO_BENCHMARKS
 BENCHFLAGS += -o $(BENCH_CSV)
 endif
 ifdef VERBOSE
-TESTFLAGS   += -v
-TESTCFLAGS  += -v
 BENCHFLAGS  += -v
 BENCHCFLAGS += -v
 endif
 ifdef EXEC
-TESTFLAGS  += --exec="$(EXEC)"
 BENCHFLAGS += --exec="$(EXEC)"
 endif
 ifneq ($(GDB),gdb)
-TESTFLAGS  += --gdb-path="$(GDB)"
 BENCHFLAGS += --gdb-path="$(GDB)"
 endif
 ifneq ($(VALGRIND),valgrind)
-TESTFLAGS  += --valgrind-path="$(VALGRIND)"
 BENCHFLAGS += --valgrind-path="$(VALGRIND)"
 endif
 ifneq ($(PERF),perf)
-TESTFLAGS  += --perf-path="$(PERF)"
 BENCHFLAGS += --perf-path="$(PERF)"
 endif
 
@@ -169,8 +137,6 @@ ifneq ($(BUILDDIR),.)
 $(if $(findstring n,$(MAKEFLAGS)),, $(shell mkdir -p \
 	$(addprefix $(BUILDDIR)/,$(dir \
 		$(SRC) \
-		$(TESTS) \
-		$(TEST_SRC) \
 		$(BENCHES) \
 		$(BENCH_SRC)))))
 endif
@@ -362,57 +328,17 @@ summary-diff sizes-diff: $(OBJ) $(CI)
 			$(BUILDDIR)/lfs.structs.csv \
 			-q $(SUMMARYFLAGS) -o-))
 
-## Build the test-runner
-.PHONY: test-runner build-test
-test-runner build-test: CFLAGS+=-Wno-missing-prototypes
-ifndef NO_COV
-test-runner build-test: CFLAGS+=--coverage
-endif
-ifdef YES_PERF
-test-runner build-test: CFLAGS+=-fno-omit-frame-pointer
-endif
-ifdef YES_PERFBD
-test-runner build-test: CFLAGS+=-fno-omit-frame-pointer
-endif
-# note we remove some binary dependent files during compilation,
-# otherwise it's way to easy to end up with outdated results
-test-runner build-test: $(TEST_RUNNER)
-ifndef NO_COV
-	rm -f $(TEST_GCDA)
-endif
-ifdef YES_PERF
-	rm -f $(TEST_PERF)
-endif
-ifdef YES_PERFBD
-	rm -f $(TEST_TRACE)
-endif
+## Build gtest tests (requires cmake)
+.PHONY: build-test
+build-test:
+	cmake -B build -DLFS_BUILD_TESTS=ON
+	cmake --build build
 
-## Run the tests, -j enables parallel tests
+## Run the gtest tests
 .PHONY: test
-test: test-runner
-	./scripts/test.py $(TEST_RUNNER) $(TESTFLAGS)
-
-## List the tests
-.PHONY: test-list
-test-list: test-runner
-	./scripts/test.py $(TEST_RUNNER) $(TESTFLAGS) -l
-
-## Summarize the testmarks
-.PHONY: testmarks
-testmarks: SUMMARYFLAGS+=-spassed
-testmarks: $(TEST_CSV) $(BUILDDIR)/lfs.test.csv
-	$(strip ./scripts/summary.py $(TEST_CSV) \
-		-bsuite \
-		-fpassed=test_passed \
-		$(SUMMARYFLAGS))
-
-## Compare testmarks against a previous run
-.PHONY: testmarks-diff
-testmarks-diff: $(TEST_CSV)
-	$(strip ./scripts/summary.py $^ \
-		-bsuite \
-		-fpassed=test_passed \
-		$(SUMMARYFLAGS) -d $(BUILDDIR)/lfs.test.csv)
+test: build-test
+	./build/gtest/lfs_tests
+	./build/gtest/lfs_internal_tests
 
 ## Build the bench-runner
 .PHONY: bench-runner build-bench
@@ -512,14 +438,8 @@ $(BUILDDIR)/lfs.perfbd.csv: $(BENCH_TRACE)
 		$(patsubst %,-F%,$(SRC)) \
 		-q $(PERFBDFLAGS) -o $@)
 
-$(BUILDDIR)/lfs.test.csv: $(TEST_CSV)
-	cp $^ $@
-
 $(BUILDDIR)/lfs.bench.csv: $(BENCH_CSV)
 	cp $^ $@
-
-$(BUILDDIR)/runners/test_runner: $(TEST_OBJ)
-	$(CC) $(CFLAGS) $^ $(LFLAGS) -o $@
 
 $(BUILDDIR)/runners/bench_runner: $(BENCH_OBJ)
 	$(CC) $(CFLAGS) $^ $(LFLAGS) -o $@
@@ -541,12 +461,6 @@ $(BUILDDIR)/%.c: %.a.c
 $(BUILDDIR)/%.c: $(BUILDDIR)/%.a.c
 	./scripts/prettyasserts.py -p LFS_ASSERT $< -o $@
 
-$(BUILDDIR)/%.t.a.c: %.toml
-	./scripts/test.py -c $< $(TESTCFLAGS) -o $@
-
-$(BUILDDIR)/%.t.a.c: %.c $(TESTS)
-	./scripts/test.py -c $(TESTS) -s $< $(TESTCFLAGS) -o $@
-
 $(BUILDDIR)/%.b.a.c: %.toml
 	./scripts/bench.py -c $< $(BENCHCFLAGS) -o $@
 
@@ -565,23 +479,12 @@ clean:
 	rm -f $(BUILDDIR)/lfs.cov.csv
 	rm -f $(BUILDDIR)/lfs.perf.csv
 	rm -f $(BUILDDIR)/lfs.perfbd.csv
-	rm -f $(BUILDDIR)/lfs.test.csv
 	rm -f $(BUILDDIR)/lfs.bench.csv
 	rm -f $(OBJ)
 	rm -f $(DEP)
 	rm -f $(ASM)
 	rm -f $(CI)
-	rm -f $(TEST_RUNNER)
-	rm -f $(TEST_A)
-	rm -f $(TEST_C)
-	rm -f $(TEST_OBJ)
-	rm -f $(TEST_DEP)
-	rm -f $(TEST_CI)
-	rm -f $(TEST_GCNO)
-	rm -f $(TEST_GCDA)
-	rm -f $(TEST_PERF)
-	rm -f $(TEST_TRACE)
-	rm -f $(TEST_CSV)
+	rm -rf build
 	rm -f $(BENCH_RUNNER)
 	rm -f $(BENCH_A)
 	rm -f $(BENCH_C)
