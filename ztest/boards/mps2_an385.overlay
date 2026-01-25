@@ -1,0 +1,35 @@
+/*
+ * Flash simulator overlay for MPS2_AN385
+ * Uses the built-in flash simulator for littlefs testing
+ */
+
+/ {
+	chosen {
+		/* Point to simulated flash instead of main flash */
+		zephyr,flash = &flash_sim0;
+	};
+};
+
+/* Enable the flash controller */
+&sim_flash_controller {
+	status = "okay";
+};
+
+/* Override flash_sim0 to have more blocks for testing */
+&flash_sim0 {
+	status = "okay";
+	reg = <0x00000000 0x10000>;  /* 64KB simulated flash */
+	erase-block-size = <1024>;
+	write-block-size = <1>;
+
+	partitions {
+		compatible = "fixed-partitions";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		storage_partition: partition@0 {
+			label = "storage_partition";
+			reg = <0x00000000 0x10000>;
+		};
+	};
+};
