@@ -30,6 +30,7 @@ add_executable(lfs_tests
     test_badblocks.cpp
     test_exhaustion.cpp
     test_shrink.cpp
+    test_wear_leveling.cpp
 )
 
 target_link_libraries(lfs_tests
