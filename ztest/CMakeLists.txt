@@ -14,9 +14,19 @@ target_sources(app PRIVATE
     src/lfs_test_bd_zephyr.c
 )
 
-# Test main
+# Test sources
 target_sources(app PRIVATE
     src/main.c
+    src/test_superblocks.c
+    src/test_files.c
+    src/test_dirs.c
+    src/test_paths.c
+    src/test_seek.c
+    src/test_move.c
+    src/test_truncate.c
+    src/test_alloc.c
+    src/test_attrs.c
+    src/test_entries.c
 )
 
 target_include_directories(app PRIVATE
