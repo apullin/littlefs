@@ -31,9 +31,9 @@ TEST_P(DirsTest, Root) {
     ASSERT_EQ(lfs_unmount(&lfs), 0);
 }
 
-// Many directory creation
+// Many directory creation (expanded N values)
 TEST_P(DirsTest, ManyCreation) {
-    const int N = 20;
+    const int N = 33;
     if ((unsigned)N >= cfg_.block_count / 2) {
         GTEST_SKIP() << "Not enough blocks";
     }
@@ -374,6 +374,139 @@ TEST_P(DirsTest, RecursiveRemove) {
 
     // Verify removed
     ASSERT_EQ(lfs_remove(&lfs, "prickly-pear"), LFS_ERR_NOENT);
+    ASSERT_EQ(lfs_unmount(&lfs), 0);
+}
+
+// File removal test
+TEST_P(DirsTest, FileRemoval) {
+    const int N = 14;
+    if ((unsigned)N >= cfg_.block_count / 2) {
+        GTEST_SKIP() << "Not enough blocks";
+    }
+
+    lfs_t lfs;
+    ASSERT_EQ(lfs_format(&lfs, &cfg_), 0);
+    ASSERT_EQ(lfs_mount(&lfs, &cfg_), 0);
+
+    for (int i = 0; i < N; i++) {
+        char path[64];
+        snprintf(path, sizeof(path), "file%03d", i);
+        lfs_file_t file;
+        ASSERT_EQ(lfs_file_open(&lfs, &file, path,
+                LFS_O_WRONLY | LFS_O_CREAT | LFS_O_EXCL), 0);
+        ASSERT_EQ(lfs_file_close(&lfs, &file), 0);
+    }
+    ASSERT_EQ(lfs_unmount(&lfs), 0);
+
+    // Remove all files
+    ASSERT_EQ(lfs_mount(&lfs, &cfg_), 0);
+    for (int i = 0; i < N; i++) {
+        char path[64];
+        snprintf(path, sizeof(path), "file%03d", i);
+        ASSERT_EQ(lfs_remove(&lfs, path), 0);
+    }
+    ASSERT_EQ(lfs_unmount(&lfs), 0);
+
+    // Verify empty
+    ASSERT_EQ(lfs_mount(&lfs, &cfg_), 0);
+    lfs_dir_t dir;
+    ASSERT_EQ(lfs_dir_open(&lfs, &dir, "/"), 0);
+    struct lfs_info info;
+    ASSERT_EQ(lfs_dir_read(&lfs, &dir, &info), 1);  // .
+    ASSERT_EQ(lfs_dir_read(&lfs, &dir, &info), 1);  // ..
+    ASSERT_EQ(lfs_dir_read(&lfs, &dir, &info), 0);
+    ASSERT_EQ(lfs_dir_close(&lfs, &dir), 0);
+    ASSERT_EQ(lfs_unmount(&lfs), 0);
+}
+
+// File rename test
+TEST_P(DirsTest, FileRename) {
+    const int N = 14;
+    if ((unsigned)N >= cfg_.block_count / 2) {
+        GTEST_SKIP() << "Not enough blocks";
+    }
+
+    lfs_t lfs;
+    ASSERT_EQ(lfs_format(&lfs, &cfg_), 0);
+    ASSERT_EQ(lfs_mount(&lfs, &cfg_), 0);
+
+    for (int i = 0; i < N; i++) {
+        char path[64];
+        snprintf(path, sizeof(path), "test%03d", i);
+        lfs_file_t file;
+        ASSERT_EQ(lfs_file_open(&lfs, &file, path,
+                LFS_O_WRONLY | LFS_O_CREAT | LFS_O_EXCL), 0);
+        ASSERT_EQ(lfs_file_close(&lfs, &file), 0);
+    }
+    ASSERT_EQ(lfs_unmount(&lfs), 0);
+
+    // Rename all files
+    ASSERT_EQ(lfs_mount(&lfs, &cfg_), 0);
+    for (int i = 0; i < N; i++) {
+        char oldpath[64], newpath[64];
+        snprintf(oldpath, sizeof(oldpath), "test%03d", i);
+        snprintf(newpath, sizeof(newpath), "tedd%03d", i);
+        ASSERT_EQ(lfs_rename(&lfs, oldpath, newpath), 0);
+    }
+    ASSERT_EQ(lfs_unmount(&lfs), 0);
+
+    // Verify renamed files
+    ASSERT_EQ(lfs_mount(&lfs, &cfg_), 0);
+    lfs_dir_t dir;
+    ASSERT_EQ(lfs_dir_open(&lfs, &dir, "/"), 0);
+    struct lfs_info info;
+    ASSERT_EQ(lfs_dir_read(&lfs, &dir, &info), 1);  // .
+    ASSERT_EQ(lfs_dir_read(&lfs, &dir, &info), 1);  // ..
+    for (int i = 0; i < N; i++) {
+        char path[64];
+        snprintf(path, sizeof(path), "tedd%03d", i);
+        ASSERT_EQ(lfs_dir_read(&lfs, &dir, &info), 1);
+        ASSERT_EQ(info.type, LFS_TYPE_REG);
+        ASSERT_STREQ(info.name, path);
+    }
+    ASSERT_EQ(lfs_dir_read(&lfs, &dir, &info), 0);
+    ASSERT_EQ(lfs_dir_close(&lfs, &dir), 0);
+    ASSERT_EQ(lfs_unmount(&lfs), 0);
+}
+
+// Remove-read test: open dir, remove entry, continue reading
+TEST_P(DirsTest, RemoveRead) {
+    const int N = 10;
+    if ((unsigned)N >= cfg_.block_count / 2) {
+        GTEST_SKIP() << "Not enough blocks";
+    }
+
+    lfs_t lfs;
+    ASSERT_EQ(lfs_format(&lfs, &cfg_), 0);
+    ASSERT_EQ(lfs_mount(&lfs, &cfg_), 0);
+
+    for (int i = 0; i < N; i++) {
+        char path[64];
+        snprintf(path, sizeof(path), "dir%03d", i);
+        ASSERT_EQ(lfs_mkdir(&lfs, path), 0);
+    }
+
+    // Open root and skip . and ..
+    lfs_dir_t dir;
+    ASSERT_EQ(lfs_dir_open(&lfs, &dir, "/"), 0);
+    struct lfs_info info;
+    ASSERT_EQ(lfs_dir_read(&lfs, &dir, &info), 1);  // .
+    ASSERT_EQ(lfs_dir_read(&lfs, &dir, &info), 1);  // ..
+
+    // Read first entry, then remove it while dir is open
+    ASSERT_EQ(lfs_dir_read(&lfs, &dir, &info), 1);
+    ASSERT_STREQ(info.name, "dir000");
+    ASSERT_EQ(lfs_remove(&lfs, "dir000"), 0);
+
+    // Should still be able to read remaining entries
+    int count = 0;
+    while (lfs_dir_read(&lfs, &dir, &info) == 1) {
+        count++;
+    }
+    // We should get N-1 remaining entries
+    ASSERT_EQ(count, N - 1);
+
+    ASSERT_EQ(lfs_dir_close(&lfs, &dir), 0);
     ASSERT_EQ(lfs_unmount(&lfs), 0);
 }
 

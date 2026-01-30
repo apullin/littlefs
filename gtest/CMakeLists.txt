@@ -31,6 +31,7 @@ add_executable(lfs_tests
     test_exhaustion.cpp
     test_shrink.cpp
     test_wear_leveling.cpp
+    test_reentrant.cpp
 )
 
 target_link_libraries(lfs_tests

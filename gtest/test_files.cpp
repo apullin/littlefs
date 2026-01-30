@@ -41,11 +41,14 @@ struct FileSizeParams {
     LfsGeometry geometry;
     lfs_size_t size;
     lfs_size_t chunk_size;
+    int32_t inline_max;  // 0 = default, -1 = disable, 8 = small
 
     std::string Name() const {
         char buf[128];
-        snprintf(buf, sizeof(buf), "%s_size%u_chunk%u",
-                geometry.name, (unsigned)size, (unsigned)chunk_size);
+        const char *ilname = (inline_max == 0) ? "ildef"
+                           : (inline_max < 0) ? "iloff" : "il8";
+        snprintf(buf, sizeof(buf), "%s_size%u_chunk%u_%s",
+                geometry.name, (unsigned)size, (unsigned)chunk_size, ilname);
         return buf;
     }
 };
@@ -56,21 +59,29 @@ protected:
     void SetUp() override {
         SetGeometry(GetParam().geometry);
         LfsTestFixture::SetUp();
+        // Apply inline_max override
+        if (GetParam().inline_max != 0) {
+            cfg_.inline_max = GetParam().inline_max;
+        }
     }
 };
 
-// Generate large file test params
+// Generate large file test params across all geometries and inline_max values
 std::vector<FileSizeParams> GenerateFileSizeParams() {
     std::vector<FileSizeParams> params;
-    // Test with default geometry and various sizes
-    LfsGeometry geom = {"default", 16, 16, 512, 2048};
+    auto geometries = AllGeometries();
 
     std::vector<lfs_size_t> sizes = {32, 8192, 262144, 0, 7, 8193};
     std::vector<lfs_size_t> chunks = {31, 16, 33, 1, 1023};
+    std::vector<int32_t> inline_maxes = {0, -1, 8};
 
-    for (auto size : sizes) {
-        for (auto chunk : chunks) {
-            params.push_back({geom, size, chunk});
+    for (const auto &geom : geometries) {
+        for (auto size : sizes) {
+            for (auto chunk : chunks) {
+                for (auto il : inline_maxes) {
+                    params.push_back({geom, size, chunk, il});
+                }
+            }
         }
     }
     return params;

@@ -512,7 +512,187 @@ TEST_P(TruncateTest, AggressiveWarmExpand) {
     ASSERT_EQ(lfs_unmount(&lfs), 0);
 }
 
+// Parameterized truncate test with MEDIUMSIZE/LARGESIZE combinations
+struct TruncateSizeParams {
+    LfsGeometry geometry;
+    lfs_size_t medium_size;
+    lfs_size_t large_size;
+
+    std::string Name() const {
+        char buf[128];
+        snprintf(buf, sizeof(buf), "%s_med%u_lg%u",
+                geometry.name, (unsigned)medium_size, (unsigned)large_size);
+        return buf;
+    }
+};
+
+class TruncateSizeTest : public LfsTestFixture,
+                         public ::testing::WithParamInterface<TruncateSizeParams> {
+protected:
+    void SetUp() override {
+        SetGeometry(GetParam().geometry);
+        LfsTestFixture::SetUp();
+    }
+};
+
+struct TruncateSizeNameGenerator {
+    std::string operator()(const ::testing::TestParamInfo<TruncateSizeParams>& info) const {
+        return info.param.Name();
+    }
+};
+
+std::vector<TruncateSizeParams> GenerateTruncateSizeParams() {
+    std::vector<TruncateSizeParams> params;
+    auto geometries = AllGeometries();
+    lfs_size_t mediums[] = {32, 33, 512, 513, 2048, 2049};
+    lfs_size_t larges[] = {512, 513, 2048, 2049, 8192, 8193};
+
+    for (const auto &geom : geometries) {
+        for (auto med : mediums) {
+            for (auto lg : larges) {
+                if (med < lg) {
+                    params.push_back({geom, med, lg});
+                }
+            }
+        }
+    }
+    return params;
+}
+
+TEST_P(TruncateSizeTest, SimpleSizeCombo) {
+    lfs_size_t MEDIUMSIZE = GetParam().medium_size;
+    lfs_size_t LARGESIZE = GetParam().large_size;
+
+    lfs_t lfs;
+    ASSERT_EQ(lfs_format(&lfs, &cfg_), 0);
+    ASSERT_EQ(lfs_mount(&lfs, &cfg_), 0);
+
+    lfs_file_t file;
+    ASSERT_EQ(lfs_file_open(&lfs, &file, "baldynoop",
+            LFS_O_WRONLY | LFS_O_CREAT), 0);
+
+    uint8_t buffer[1024];
+    const char* data = "hair";
+    size_t size = strlen(data);
+    for (lfs_off_t j = 0; j < (lfs_off_t)LARGESIZE; j += size) {
+        lfs_size_t chunk = lfs_min(size, LARGESIZE - j);
+        ASSERT_EQ(lfs_file_write(&lfs, &file, data, chunk), (lfs_ssize_t)chunk);
+    }
+    ASSERT_EQ(lfs_file_close(&lfs, &file), 0);
+    ASSERT_EQ(lfs_unmount(&lfs), 0);
+
+    // Truncate to medium
+    ASSERT_EQ(lfs_mount(&lfs, &cfg_), 0);
+    ASSERT_EQ(lfs_file_open(&lfs, &file, "baldynoop", LFS_O_RDWR), 0);
+    ASSERT_EQ(lfs_file_truncate(&lfs, &file, MEDIUMSIZE), 0);
+    ASSERT_EQ(lfs_file_size(&lfs, &file), (lfs_soff_t)MEDIUMSIZE);
+    ASSERT_EQ(lfs_file_close(&lfs, &file), 0);
+    ASSERT_EQ(lfs_unmount(&lfs), 0);
+
+    // Verify
+    ASSERT_EQ(lfs_mount(&lfs, &cfg_), 0);
+    ASSERT_EQ(lfs_file_open(&lfs, &file, "baldynoop", LFS_O_RDONLY), 0);
+    ASSERT_EQ(lfs_file_size(&lfs, &file), (lfs_soff_t)MEDIUMSIZE);
+    for (lfs_off_t j = 0; j < (lfs_off_t)MEDIUMSIZE; j += size) {
+        lfs_size_t chunk = lfs_min(size, MEDIUMSIZE - j);
+        ASSERT_EQ(lfs_file_read(&lfs, &file, buffer, chunk), (lfs_ssize_t)chunk);
+        ASSERT_EQ(memcmp(buffer, data, chunk), 0);
+    }
+    ASSERT_EQ(lfs_file_close(&lfs, &file), 0);
+    ASSERT_EQ(lfs_unmount(&lfs), 0);
+}
+
+TEST_P(TruncateSizeTest, ReadSizeCombo) {
+    lfs_size_t MEDIUMSIZE = GetParam().medium_size;
+    lfs_size_t LARGESIZE = GetParam().large_size;
+
+    lfs_t lfs;
+    ASSERT_EQ(lfs_format(&lfs, &cfg_), 0);
+    ASSERT_EQ(lfs_mount(&lfs, &cfg_), 0);
+
+    lfs_file_t file;
+    ASSERT_EQ(lfs_file_open(&lfs, &file, "baldyread",
+            LFS_O_WRONLY | LFS_O_CREAT), 0);
+
+    uint8_t buffer[1024];
+    const char* data = "hair";
+    size_t size = strlen(data);
+    for (lfs_off_t j = 0; j < (lfs_off_t)LARGESIZE; j += size) {
+        lfs_size_t chunk = lfs_min(size, LARGESIZE - j);
+        ASSERT_EQ(lfs_file_write(&lfs, &file, data, chunk), (lfs_ssize_t)chunk);
+    }
+    ASSERT_EQ(lfs_file_close(&lfs, &file), 0);
+    ASSERT_EQ(lfs_unmount(&lfs), 0);
+
+    // Truncate and read in same session
+    ASSERT_EQ(lfs_mount(&lfs, &cfg_), 0);
+    ASSERT_EQ(lfs_file_open(&lfs, &file, "baldyread", LFS_O_RDWR), 0);
+    ASSERT_EQ(lfs_file_truncate(&lfs, &file, MEDIUMSIZE), 0);
+
+    for (lfs_off_t j = 0; j < (lfs_off_t)MEDIUMSIZE; j += size) {
+        lfs_size_t chunk = lfs_min(size, MEDIUMSIZE - j);
+        ASSERT_EQ(lfs_file_read(&lfs, &file, buffer, chunk), (lfs_ssize_t)chunk);
+        ASSERT_EQ(memcmp(buffer, data, chunk), 0);
+    }
+    ASSERT_EQ(lfs_file_close(&lfs, &file), 0);
+    ASSERT_EQ(lfs_unmount(&lfs), 0);
+}
+
+TEST_P(TruncateSizeTest, WriteSizeCombo) {
+    lfs_size_t MEDIUMSIZE = GetParam().medium_size;
+    lfs_size_t LARGESIZE = GetParam().large_size;
+
+    lfs_t lfs;
+    ASSERT_EQ(lfs_format(&lfs, &cfg_), 0);
+    ASSERT_EQ(lfs_mount(&lfs, &cfg_), 0);
+
+    lfs_file_t file;
+    ASSERT_EQ(lfs_file_open(&lfs, &file, "baldywrite",
+            LFS_O_WRONLY | LFS_O_CREAT), 0);
+
+    uint8_t buffer[1024];
+    const char* data = "hair";
+    size_t size = strlen(data);
+    for (lfs_off_t j = 0; j < (lfs_off_t)LARGESIZE; j += size) {
+        lfs_size_t chunk = lfs_min(size, LARGESIZE - j);
+        ASSERT_EQ(lfs_file_write(&lfs, &file, data, chunk), (lfs_ssize_t)chunk);
+    }
+    ASSERT_EQ(lfs_file_close(&lfs, &file), 0);
+    ASSERT_EQ(lfs_unmount(&lfs), 0);
+
+    // Truncate and write new data
+    ASSERT_EQ(lfs_mount(&lfs, &cfg_), 0);
+    ASSERT_EQ(lfs_file_open(&lfs, &file, "baldywrite", LFS_O_RDWR), 0);
+    ASSERT_EQ(lfs_file_truncate(&lfs, &file, MEDIUMSIZE), 0);
+
+    const char* newdata = "bald";
+    lfs_file_seek(&lfs, &file, 0, LFS_SEEK_SET);
+    for (lfs_off_t j = 0; j < (lfs_off_t)MEDIUMSIZE; j += size) {
+        lfs_size_t chunk = lfs_min(size, MEDIUMSIZE - j);
+        ASSERT_EQ(lfs_file_write(&lfs, &file, newdata, chunk), (lfs_ssize_t)chunk);
+    }
+    ASSERT_EQ(lfs_file_close(&lfs, &file), 0);
+    ASSERT_EQ(lfs_unmount(&lfs), 0);
+
+    // Verify
+    ASSERT_EQ(lfs_mount(&lfs, &cfg_), 0);
+    ASSERT_EQ(lfs_file_open(&lfs, &file, "baldywrite", LFS_O_RDONLY), 0);
+    ASSERT_EQ(lfs_file_size(&lfs, &file), (lfs_soff_t)MEDIUMSIZE);
+    for (lfs_off_t j = 0; j < (lfs_off_t)MEDIUMSIZE; j += size) {
+        lfs_size_t chunk = lfs_min(size, MEDIUMSIZE - j);
+        ASSERT_EQ(lfs_file_read(&lfs, &file, buffer, chunk), (lfs_ssize_t)chunk);
+        ASSERT_EQ(memcmp(buffer, newdata, chunk), 0);
+    }
+    ASSERT_EQ(lfs_file_close(&lfs, &file), 0);
+    ASSERT_EQ(lfs_unmount(&lfs), 0);
+}
+
 INSTANTIATE_TEST_SUITE_P(
     Geometries, TruncateTest,
     ::testing::ValuesIn(AllGeometries()),
     GeometryNameGenerator{});
+
+INSTANTIATE_TEST_SUITE_P(
+    TruncSizes, TruncateSizeTest,
+    ::testing::ValuesIn(GenerateTruncateSizeParams()),
+    TruncateSizeNameGenerator{});
