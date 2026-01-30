@@ -56,6 +56,8 @@
 // Test fixture for compat tests
 class CompatTest : public ::testing::Test {
 protected:
+    static constexpr lfs_block_t root_pair[2] = {0, 1};
+
     void SetUp() override {
         // Initialize block device config
         memset(&bdcfg_, 0, sizeof(bdcfg_));
@@ -439,7 +441,7 @@ TEST_F(CompatTest, MajorIncompat) {
     ASSERT_EQ(lfs_fs_stat(&lfs, &fsinfo), 0);
 
     lfs_mdir_t mdir;
-    ASSERT_EQ(lfs_test_dir_fetch(&lfs, &mdir, (lfs_block_t[2]){0, 1}), 0);
+    ASSERT_EQ(lfs_test_dir_fetch(&lfs, &mdir, root_pair), 0);
 
     lfs_superblock_t superblock = {
         .version     = LFS_DISK_VERSION + 0x00010000,
@@ -450,9 +452,11 @@ TEST_F(CompatTest, MajorIncompat) {
         .attr_max    = fsinfo.attr_max,
     };
     lfs_test_superblock_tole32(&superblock);
-    ASSERT_EQ(lfs_test_dir_commit(&lfs, &mdir, LFS_MKATTRS(
-            {LFS_MKTAG(LFS_TYPE_INLINESTRUCT, 0, sizeof(superblock)),
-                &superblock})), 0);
+    struct lfs_attr_internal attrs1[] = {
+        {LFS_MKTAG(LFS_TYPE_INLINESTRUCT, 0, sizeof(superblock)), &superblock}
+    };
+    ASSERT_EQ(lfs_test_dir_commit(&lfs, &mdir,
+            attrs1, LFS_ATTR_COUNT(attrs1)), 0);
     ASSERT_EQ(lfs_unmount(&lfs), 0);
 
     // Mount should now fail
@@ -472,7 +476,7 @@ TEST_F(CompatTest, MinorIncompat) {
     ASSERT_EQ(lfs_fs_stat(&lfs, &fsinfo), 0);
 
     lfs_mdir_t mdir;
-    ASSERT_EQ(lfs_test_dir_fetch(&lfs, &mdir, (lfs_block_t[2]){0, 1}), 0);
+    ASSERT_EQ(lfs_test_dir_fetch(&lfs, &mdir, root_pair), 0);
 
     lfs_superblock_t superblock = {
         .version     = LFS_DISK_VERSION + 0x00000001,
@@ -483,9 +487,11 @@ TEST_F(CompatTest, MinorIncompat) {
         .attr_max    = fsinfo.attr_max,
     };
     lfs_test_superblock_tole32(&superblock);
-    ASSERT_EQ(lfs_test_dir_commit(&lfs, &mdir, LFS_MKATTRS(
-            {LFS_MKTAG(LFS_TYPE_INLINESTRUCT, 0, sizeof(superblock)),
-                &superblock})), 0);
+    struct lfs_attr_internal attrs2[] = {
+        {LFS_MKTAG(LFS_TYPE_INLINESTRUCT, 0, sizeof(superblock)), &superblock}
+    };
+    ASSERT_EQ(lfs_test_dir_commit(&lfs, &mdir,
+            attrs2, LFS_ATTR_COUNT(attrs2)), 0);
     ASSERT_EQ(lfs_unmount(&lfs), 0);
 
     // Mount should now fail
@@ -517,7 +523,7 @@ TEST_F(CompatTest, MinorBump) {
     ASSERT_EQ(lfs_fs_stat(&lfs, &fsinfo_tmp), 0);
 
     lfs_mdir_t mdir;
-    ASSERT_EQ(lfs_test_dir_fetch(&lfs, &mdir, (lfs_block_t[2]){0, 1}), 0);
+    ASSERT_EQ(lfs_test_dir_fetch(&lfs, &mdir, root_pair), 0);
 
     lfs_superblock_t superblock = {
         .version     = LFS_DISK_VERSION - 0x00000001,
@@ -528,9 +534,11 @@ TEST_F(CompatTest, MinorBump) {
         .attr_max    = fsinfo_tmp.attr_max,
     };
     lfs_test_superblock_tole32(&superblock);
-    ASSERT_EQ(lfs_test_dir_commit(&lfs, &mdir, LFS_MKATTRS(
-            {LFS_MKTAG(LFS_TYPE_INLINESTRUCT, 0, sizeof(superblock)),
-                &superblock})), 0);
+    struct lfs_attr_internal attrs3[] = {
+        {LFS_MKTAG(LFS_TYPE_INLINESTRUCT, 0, sizeof(superblock)), &superblock}
+    };
+    ASSERT_EQ(lfs_test_dir_commit(&lfs, &mdir,
+            attrs3, LFS_ATTR_COUNT(attrs3)), 0);
     ASSERT_EQ(lfs_unmount(&lfs), 0);
 
     // Mount should still work (old minor version is compatible)

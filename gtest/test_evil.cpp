@@ -17,6 +17,8 @@
 // Test fixture for evil tests
 class EvilTest : public ::testing::Test {
 protected:
+    static constexpr lfs_block_t root_pair[2] = {0, 1};
+
     void SetUp() override {
         // Initialize block device config
         memset(&bdcfg_, 0, sizeof(bdcfg_));
@@ -74,14 +76,17 @@ TEST_P(EvilInvalidTailTest, InvalidTailPointer) {
     // Change tail-pointer to invalid pointers
     ASSERT_EQ(lfs_test_init(&lfs, &cfg_), 0);
     lfs_mdir_t mdir;
-    ASSERT_EQ(lfs_test_dir_fetch(&lfs, &mdir, (lfs_block_t[2]){0, 1}), 0);
+    ASSERT_EQ(lfs_test_dir_fetch(&lfs, &mdir, root_pair), 0);
 
     lfs_block_t bad_pair[2] = {
         (lfs_block_t)((invalset & 0x1) ? 0xcccccccc : 0),
         (lfs_block_t)((invalset & 0x2) ? 0xcccccccc : 0)
     };
-    ASSERT_EQ(lfs_test_dir_commit(&lfs, &mdir, LFS_MKATTRS(
-            {LFS_MKTAG(LFS_TYPE_HARDTAIL, 0x3ff, 8), bad_pair})), 0);
+    struct lfs_attr_internal attrs[] = {
+        {LFS_MKTAG(LFS_TYPE_HARDTAIL, 0x3ff, 8), bad_pair}
+    };
+    ASSERT_EQ(lfs_test_dir_commit(&lfs, &mdir,
+            attrs, LFS_ATTR_COUNT(attrs)), 0);
     ASSERT_EQ(lfs_test_deinit(&lfs), 0);
 
     // Test that mount fails gracefully
@@ -109,7 +114,7 @@ TEST_P(EvilInvalidDirTest, InvalidDirPointer) {
     // Change the dir pointer to be invalid
     ASSERT_EQ(lfs_test_init(&lfs, &cfg_), 0);
     lfs_mdir_t mdir;
-    ASSERT_EQ(lfs_test_dir_fetch(&lfs, &mdir, (lfs_block_t[2]){0, 1}), 0);
+    ASSERT_EQ(lfs_test_dir_fetch(&lfs, &mdir, root_pair), 0);
 
     // Verify id 1 is our directory
     uint8_t buffer[1024];
@@ -124,8 +129,11 @@ TEST_P(EvilInvalidDirTest, InvalidDirPointer) {
         (lfs_block_t)((invalset & 0x1) ? 0xcccccccc : 0),
         (lfs_block_t)((invalset & 0x2) ? 0xcccccccc : 0)
     };
-    ASSERT_EQ(lfs_test_dir_commit(&lfs, &mdir, LFS_MKATTRS(
-            {LFS_MKTAG(LFS_TYPE_DIRSTRUCT, 1, 8), bad_pair})), 0);
+    struct lfs_attr_internal attrs[] = {
+        {LFS_MKTAG(LFS_TYPE_DIRSTRUCT, 1, 8), bad_pair}
+    };
+    ASSERT_EQ(lfs_test_dir_commit(&lfs, &mdir,
+            attrs, LFS_ATTR_COUNT(attrs)), 0);
     ASSERT_EQ(lfs_test_deinit(&lfs), 0);
 
     // Test that accessing our bad dir fails gracefully
@@ -173,7 +181,7 @@ TEST_P(EvilInvalidFileTest, InvalidFilePointer) {
     // Change the file pointer to be invalid
     ASSERT_EQ(lfs_test_init(&lfs, &cfg_), 0);
     lfs_mdir_t mdir;
-    ASSERT_EQ(lfs_test_dir_fetch(&lfs, &mdir, (lfs_block_t[2]){0, 1}), 0);
+    ASSERT_EQ(lfs_test_dir_fetch(&lfs, &mdir, root_pair), 0);
 
     // Verify id 1 is our file
     uint8_t buffer[1024];
@@ -185,9 +193,11 @@ TEST_P(EvilInvalidFileTest, InvalidFilePointer) {
 
     // Change file pointer to invalid CTZ structure
     struct lfs_ctz bad_ctz = {0xcccccccc, lfs_test_tole32(SIZE)};
-    ASSERT_EQ(lfs_test_dir_commit(&lfs, &mdir, LFS_MKATTRS(
-            {LFS_MKTAG(LFS_TYPE_CTZSTRUCT, 1, sizeof(struct lfs_ctz)),
-                &bad_ctz})), 0);
+    struct lfs_attr_internal attrs[] = {
+        {LFS_MKTAG(LFS_TYPE_CTZSTRUCT, 1, sizeof(struct lfs_ctz)), &bad_ctz}
+    };
+    ASSERT_EQ(lfs_test_dir_commit(&lfs, &mdir,
+            attrs, LFS_ATTR_COUNT(attrs)), 0);
     ASSERT_EQ(lfs_test_deinit(&lfs), 0);
 
     // Test that accessing our bad file fails
@@ -226,7 +236,7 @@ TEST_P(EvilInvalidGstateTest, InvalidGstatePointer) {
     // Create an invalid gstate
     ASSERT_EQ(lfs_test_init(&lfs, &cfg_), 0);
     lfs_mdir_t mdir;
-    ASSERT_EQ(lfs_test_dir_fetch(&lfs, &mdir, (lfs_block_t[2]){0, 1}), 0);
+    ASSERT_EQ(lfs_test_dir_fetch(&lfs, &mdir, root_pair), 0);
 
     lfs_block_t bad_pair[2] = {
         (lfs_block_t)((invalset & 0x1) ? 0xcccccccc : 0),
@@ -253,11 +263,14 @@ TEST_F(EvilTest, MdirLoop) {
     // Change tail-pointer to point to itself
     ASSERT_EQ(lfs_test_init(&lfs, &cfg_), 0);
     lfs_mdir_t mdir;
-    ASSERT_EQ(lfs_test_dir_fetch(&lfs, &mdir, (lfs_block_t[2]){0, 1}), 0);
+    ASSERT_EQ(lfs_test_dir_fetch(&lfs, &mdir, root_pair), 0);
 
     lfs_block_t self_pair[2] = {0, 1};
-    ASSERT_EQ(lfs_test_dir_commit(&lfs, &mdir, LFS_MKATTRS(
-            {LFS_MKTAG(LFS_TYPE_HARDTAIL, 0x3ff, 8), self_pair})), 0);
+    struct lfs_attr_internal attrs[] = {
+        {LFS_MKTAG(LFS_TYPE_HARDTAIL, 0x3ff, 8), self_pair}
+    };
+    ASSERT_EQ(lfs_test_dir_commit(&lfs, &mdir,
+            attrs, LFS_ATTR_COUNT(attrs)), 0);
     ASSERT_EQ(lfs_test_deinit(&lfs), 0);
 
     // Test that mount fails gracefully
@@ -278,7 +291,7 @@ TEST_F(EvilTest, MdirLoop2) {
     ASSERT_EQ(lfs_test_init(&lfs, &cfg_), 0);
     lfs_mdir_t mdir;
     lfs_block_t pair[2];
-    ASSERT_EQ(lfs_test_dir_fetch(&lfs, &mdir, (lfs_block_t[2]){0, 1}), 0);
+    ASSERT_EQ(lfs_test_dir_fetch(&lfs, &mdir, root_pair), 0);
 
     lfs_stag_t tag = lfs_test_dir_get(&lfs, &mdir,
             LFS_MKTAG(0x7ff, 0x3ff, 0),
@@ -288,9 +301,12 @@ TEST_F(EvilTest, MdirLoop2) {
 
     // Change child's tail to point back to root
     ASSERT_EQ(lfs_test_dir_fetch(&lfs, &mdir, pair), 0);
-    lfs_block_t root_pair[2] = {0, 1};
-    ASSERT_EQ(lfs_test_dir_commit(&lfs, &mdir, LFS_MKATTRS(
-            {LFS_MKTAG(LFS_TYPE_HARDTAIL, 0x3ff, 8), root_pair})), 0);
+    lfs_block_t back_to_root[2] = {0, 1};
+    struct lfs_attr_internal attrs[] = {
+        {LFS_MKTAG(LFS_TYPE_HARDTAIL, 0x3ff, 8), back_to_root}
+    };
+    ASSERT_EQ(lfs_test_dir_commit(&lfs, &mdir,
+            attrs, LFS_ATTR_COUNT(attrs)), 0);
     ASSERT_EQ(lfs_test_deinit(&lfs), 0);
 
     // Test that mount fails gracefully
@@ -311,7 +327,7 @@ TEST_F(EvilTest, MdirLoopChild) {
     ASSERT_EQ(lfs_test_init(&lfs, &cfg_), 0);
     lfs_mdir_t mdir;
     lfs_block_t pair[2];
-    ASSERT_EQ(lfs_test_dir_fetch(&lfs, &mdir, (lfs_block_t[2]){0, 1}), 0);
+    ASSERT_EQ(lfs_test_dir_fetch(&lfs, &mdir, root_pair), 0);
 
     lfs_stag_t tag = lfs_test_dir_get(&lfs, &mdir,
             LFS_MKTAG(0x7ff, 0x3ff, 0),
@@ -321,8 +337,11 @@ TEST_F(EvilTest, MdirLoopChild) {
 
     // Change child's tail to point to itself
     ASSERT_EQ(lfs_test_dir_fetch(&lfs, &mdir, pair), 0);
-    ASSERT_EQ(lfs_test_dir_commit(&lfs, &mdir, LFS_MKATTRS(
-            {LFS_MKTAG(LFS_TYPE_HARDTAIL, 0x3ff, 8), pair})), 0);
+    struct lfs_attr_internal attrs[] = {
+        {LFS_MKTAG(LFS_TYPE_HARDTAIL, 0x3ff, 8), pair}
+    };
+    ASSERT_EQ(lfs_test_dir_commit(&lfs, &mdir,
+            attrs, LFS_ATTR_COUNT(attrs)), 0);
     ASSERT_EQ(lfs_test_deinit(&lfs), 0);
 
     // Test that mount fails gracefully

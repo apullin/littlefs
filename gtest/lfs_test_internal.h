@@ -39,9 +39,12 @@ struct lfs_attr_internal {
     const void *buffer;
 };
 
-#define LFS_MKATTRS(...) \
-    (struct lfs_attr_internal[]){__VA_ARGS__}, \
-    sizeof((struct lfs_attr_internal[]){__VA_ARGS__}) / sizeof(struct lfs_attr_internal)
+// C++ compatible: declare attrs as a local array, then pass pointer + count.
+// Usage:
+//   struct lfs_attr_internal attrs[] = { {tag, buf} };
+//   lfs_test_dir_commit(&lfs, &mdir, attrs, LFS_ATTR_COUNT(attrs));
+#define LFS_ATTR_COUNT(attrs) \
+    (int)(sizeof(attrs) / sizeof((attrs)[0]))
 
 // Type codes (match internal definitions in lfs.c)
 #define LFS_TYPE_NAME           0x000
