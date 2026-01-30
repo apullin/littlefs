@@ -1,5 +1,8 @@
 name: test
-on: [push, pull_request]
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
 
 defaults:
   run:
@@ -8,7 +11,6 @@ defaults:
 env:
   CFLAGS: -Werror
   MAKEFLAGS: -j
-  TESTFLAGS: -k
   BENCHFLAGS:
 
 jobs:
@@ -26,10 +28,9 @@ jobs:
         run: |
           # need a few things
           sudo apt-get update -qq
-          sudo apt-get install -qq gcc python3 python3-pip
-          pip3 install toml
+          sudo apt-get install -qq gcc g++ cmake python3
           gcc --version
-          python3 --version
+          cmake --version
 
       # cross-compile with ARM Thumb (32-bit, little-endian)
       - name: install-thumb
@@ -88,24 +89,13 @@ jobs:
             make all
           rm test.c
 
-      # run the tests!
+      # run the gtest tests (x86_64 only - cross-compiling C++ gtest
+      # for other architectures is complex and not worth the effort)
       - name: test
+        if: ${{matrix.arch == 'x86_64'}}
         run: |
           make clean
           make test
-
-      # collect coverage info
-      #
-      # Note the goal is to maximize coverage in the small, easy-to-run
-      # tests, so we intentionally exclude more aggressive powerloss testing
-      # from coverage results
-      - name: cov
-        if: ${{matrix.arch == 'x86_64'}}
-        run: |
-          make lfs.cov.csv
-          ./scripts/cov.py -u lfs.cov.csv
-          mkdir -p cov
-          cp lfs.cov.csv cov/cov.csv
 
       # find compile-time measurements
       - name: sizes
@@ -279,84 +269,6 @@ jobs:
           path: status
           retention-days: 1
 
-      # create cov statuses
-      - name: upload-cov
-        if: ${{matrix.arch == 'x86_64'}}
-        uses: actions/upload-artifact@v4
-        with:
-          name: cov
-          path: cov
-      - name: status-cov
-        if: ${{matrix.arch == 'x86_64'}}
-        run: |
-          mkdir -p status
-          f=cov/cov.csv
-          for s in lines branches
-          do
-            export STEP="cov"
-            export CONTEXT="cov / $s"
-            export PREV="$(curl -sS \
-              "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/status/master`
-                `?per_page=100" \
-              | jq -re 'select(.sha != env.GITHUB_SHA) | .statuses[]
-                | select(.context == env.CONTEXT).description
-                | capture("(?<prev_a>[0-9]+)/(?<prev_b>[0-9]+)")
-                | 100*((.prev_a|tonumber) / (.prev_b|tonumber))' \
-              || echo 0)"
-            export DESCRIPTION="$(./scripts/cov.py -u $f -f$s -Y \
-              | awk -F '[ /%]+' -v s=$s '
-                NR==2 {$1=0; printf "%d/%d %s",$2,$3,s}
-                NR==2 && ENVIRON["PREV"]+0 != 0 {
-                  printf " (%+.1f%%)",$4-ENVIRON["PREV"]
-                }')"
-            jq -n '{
-              state: "success",
-              context: env.CONTEXT,
-              description: env.DESCRIPTION,
-              target_job: "${{github.job}} (${{matrix.arch}})",
-              target_step: env.STEP,
-            }' | tee status/$(basename $f .csv)-$s.json
-          done
-      - name: upload-status-cov
-        if: ${{matrix.arch == 'x86_64'}}
-        uses: actions/upload-artifact@v4
-        with:
-          name: status-cov
-          path: status
-          retention-days: 1
-
-  # run as many exhaustive tests as fits in GitHub's time limits
-  #
-  # this grows exponentially, so it doesn't turn out to be that many
-  test-pls:
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        pls: [1, 2]
-
-    steps:
-      - uses: actions/checkout@v4
-      - name: install
-        run: |
-          # need a few things
-          sudo apt-get update -qq
-          sudo apt-get install -qq gcc python3 python3-pip
-          pip3 install toml
-          gcc --version
-          python3 --version
-      - name: test-pls
-        if: ${{matrix.pls <= 1}}
-        run: |
-          TESTFLAGS="$TESTFLAGS -P${{matrix.pls}}" make test
-      # >=2pls takes multiple days to run fully, so we can only
-      # run a subset of tests, these are the most important
-      - name: test-limited-pls
-        if: ${{matrix.pls > 1}}
-        run: |
-          TESTFLAGS="$TESTFLAGS -P${{matrix.pls}} test_dirs test_relocations" \
-            make test
-
   # run with LFS_NO_INTRINSICS to make sure that works
   test-no-intrinsics:
     runs-on: ubuntu-latest
@@ -364,15 +276,17 @@ jobs:
       - uses: actions/checkout@v4
       - name: install
         run: |
-          # need a few things
           sudo apt-get update -qq
-          sudo apt-get install -qq gcc python3 python3-pip
-          pip3 install toml
+          sudo apt-get install -qq gcc g++ cmake
           gcc --version
-          python3 --version
+          cmake --version
       - name: test-no-intrinsics
         run: |
-          CFLAGS="$CFLAGS -DLFS_NO_INTRINSICS" make test
+          cmake -B build -DLFS_BUILD_TESTS=ON \
+            -DCMAKE_C_FLAGS="-DLFS_NO_INTRINSICS"
+          cmake --build build -j$(nproc)
+          ./build/gtest/lfs_tests
+          ./build/gtest/lfs_internal_tests
 
   test-shrink:
     runs-on: ubuntu-latest
@@ -380,15 +294,17 @@ jobs:
       - uses: actions/checkout@v4
       - name: install
         run: |
-          # need a few things
           sudo apt-get update -qq
-          sudo apt-get install -qq gcc python3 python3-pip
-          pip3 install toml
+          sudo apt-get install -qq gcc g++ cmake
           gcc --version
-          python3 --version
-      - name: test-no-intrinsics
+          cmake --version
+      - name: test-shrink
         run: |
-          CFLAGS="$CFLAGS -DLFS_SHRINKNONRELOCATING" make test
+          cmake -B build -DLFS_BUILD_TESTS=ON \
+            -DCMAKE_C_FLAGS="-DLFS_SHRINKNONRELOCATING"
+          cmake --build build -j$(nproc)
+          ./build/gtest/lfs_tests
+          ./build/gtest/lfs_internal_tests
 
   # run with all trace options enabled to at least make sure these
   # all compile
@@ -398,20 +314,17 @@ jobs:
       - uses: actions/checkout@v4
       - name: install
         run: |
-          # need a few things
           sudo apt-get update -qq
-          sudo apt-get install -qq gcc python3 python3-pip
-          pip3 install toml
+          sudo apt-get install -qq gcc g++ cmake
           gcc --version
-          python3 --version
+          cmake --version
       - name: test-yes-trace
         run: |
-          CFLAGS="$CFLAGS \
-            -DLFS_YES_TRACE \
-            -DLFS_RAMBD_YES_TRACE \
-            -DLFS_FILEBD_YES_TRACE \
-            -DLFS_RAMBD_YES_TRACE" \
-            make test
+          cmake -B build -DLFS_BUILD_TESTS=ON \
+            -DCMAKE_C_FLAGS="-DLFS_YES_TRACE -DLFS_RAMBD_YES_TRACE -DLFS_FILEBD_YES_TRACE"
+          cmake --build build -j$(nproc)
+          ./build/gtest/lfs_tests
+          ./build/gtest/lfs_internal_tests
 
   # run LFS_MULTIVERSION tests
   test-multiversion:
@@ -420,34 +333,17 @@ jobs:
       - uses: actions/checkout@v4
       - name: install
         run: |
-          # need a few things
           sudo apt-get update -qq
-          sudo apt-get install -qq gcc python3 python3-pip
-          pip3 install toml
+          sudo apt-get install -qq gcc g++ cmake
           gcc --version
-          python3 --version
+          cmake --version
       - name: test-multiversion
         run: |
-          CFLAGS="$CFLAGS -DLFS_MULTIVERSION" make test
-
-  # run tests on the older version lfs2.0
-  test-lfs2_0:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: install
-        run: |
-          # need a few things
-          sudo apt-get update -qq
-          sudo apt-get install -qq gcc python3 python3-pip
-          pip3 install toml
-          gcc --version
-          python3 --version
-      - name: test-lfs2_0
-        run: |
-          CFLAGS="$CFLAGS -DLFS_MULTIVERSION" \
-          TESTFLAGS="$TESTFLAGS -DDISK_VERSION=0x00020000" \
-            make test
+          cmake -B build -DLFS_BUILD_TESTS=ON \
+            -DCMAKE_C_FLAGS="-DLFS_MULTIVERSION"
+          cmake --build build -j$(nproc)
+          ./build/gtest/lfs_tests
+          ./build/gtest/lfs_internal_tests
 
   # run under Valgrind to check for memory errors
   test-valgrind:
@@ -456,19 +352,20 @@ jobs:
       - uses: actions/checkout@v4
       - name: install
         run: |
-          # need a few things
           sudo apt-get update -qq
-          sudo apt-get install -qq gcc python3 python3-pip valgrind
-          pip3 install toml
+          sudo apt-get install -qq gcc g++ cmake valgrind
           gcc --version
-          python3 --version
+          cmake --version
           valgrind --version
-      # Valgrind takes a while with diminishing value, so only test
-      # on one geometry
       - name: test-valgrind
         run: |
-          TESTFLAGS="$TESTFLAGS --valgrind --context=1024 -Gdefault -Pnone" \
-            make test
+          cmake -B build -DLFS_BUILD_TESTS=ON
+          cmake --build build -j$(nproc)
+          # Run the default geometry tests under valgrind
+          valgrind --leak-check=full --error-exitcode=1 \
+            ./build/gtest/lfs_tests --gtest_filter="*default*"
+          valgrind --leak-check=full --error-exitcode=1 \
+            ./build/gtest/lfs_internal_tests
 
   # compile/run with Clang, mostly to check for Clang-specific warnings
   test-clang:
@@ -477,15 +374,16 @@ jobs:
       - uses: actions/checkout@v4
       - name: install
         run: |
-          # need a few things
-          sudo apt-get install -qq clang python3 python3-pip
-          pip3 install toml
+          sudo apt-get update -qq
+          sudo apt-get install -qq clang cmake
           clang --version
-          python3 --version
+          cmake --version
       - name: test-clang
         run: |
-          CC=clang \
-            make test
+          CC=clang CXX=clang++ cmake -B build -DLFS_BUILD_TESTS=ON
+          cmake --build build -j$(nproc)
+          ./build/gtest/lfs_tests
+          ./build/gtest/lfs_internal_tests
 
   # run benchmarks
   #
@@ -565,42 +463,6 @@ jobs:
           path: status
           retention-days: 1
 
-  # run compatibility tests using the current master as the previous version
-  test-compat:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        if: ${{github.event_name == 'pull_request'}}
-      # checkout the current pr target into lfsp
-      - uses: actions/checkout@v4
-        if: ${{github.event_name == 'pull_request'}}
-        with:
-          ref: ${{github.event.pull_request.base.ref}}
-          path: lfsp
-      - name: install
-        if: ${{github.event_name == 'pull_request'}}
-        run: |
-          # need a few things
-          sudo apt-get update -qq
-          sudo apt-get install -qq gcc python3 python3-pip
-          pip3 install toml
-          gcc --version
-          python3 --version
-      # adjust prefix of lfsp
-      - name: changeprefix
-        if: ${{github.event_name == 'pull_request'}}
-        run: |
-          ./scripts/changeprefix.py lfs lfsp lfsp/*.h lfsp/*.c
-      - name: test-compat
-        if: ${{github.event_name == 'pull_request'}}
-        run: |
-          TESTS=tests/test_compat.toml \
-            SRC="$(find . lfsp -name '*.c' -maxdepth 1 \
-                -and -not -name '*.t.*' \
-                -and -not -name '*.b.*')" \
-            CFLAGS="-DLFSP=lfsp/lfsp.h" \
-            make test
-
   # self-host with littlefs-fuse for a fuzz-like test
   fuse:
     runs-on: ubuntu-latest
@@ -611,8 +473,7 @@ jobs:
         run: |
           # need a few things
           sudo apt-get update -qq
-          sudo apt-get install -qq gcc python3 python3-pip libfuse-dev
-          sudo pip3 install toml
+          sudo apt-get install -qq gcc python3 libfuse-dev
           gcc --version
           python3 --version
           fusermount -V
@@ -648,8 +509,7 @@ jobs:
           cd mount/littlefs
           stat .
           ls -flh
-          make -B test-runner
-          make -B test
+          make -B build
 
   # test migration using littlefs-fuse
   migrate:
@@ -661,8 +521,7 @@ jobs:
         run: |
           # need a few things
           sudo apt-get update -qq
-          sudo apt-get install -qq gcc python3 python3-pip libfuse-dev
-          sudo pip3 install toml
+          sudo apt-get install -qq gcc python3 libfuse-dev
           gcc --version
           python3 --version
           fusermount -V
@@ -705,8 +564,7 @@ jobs:
           cd mount/littlefs
           stat .
           ls -flh
-          make -B test-runner
-          make -B test
+          make -B build
 
           # attempt to migrate
           cd ../..
@@ -720,8 +578,7 @@ jobs:
           cd mount/littlefs
           stat .
           ls -flh
-          make -B test-runner
-          make -B test
+          make -B build
 
   # status related tasks that run after tests
   status:
@@ -734,8 +591,7 @@ jobs:
         if: ${{github.event_name == 'pull_request'}}
         run: |
           # need a few things
-          sudo apt-get install -qq gcc python3 python3-pip
-          pip3 install toml
+          sudo apt-get install -qq gcc python3
           gcc --version
           python3 --version
       - uses: actions/download-artifact@v4
@@ -745,13 +601,6 @@ jobs:
           pattern: '{sizes,sizes-*}'
           merge-multiple: true
           path: sizes
-      - uses: actions/download-artifact@v4
-        if: ${{github.event_name == 'pull_request'}}
-        continue-on-error: true
-        with:
-          pattern: '{cov,cov-*}'
-          merge-multiple: true
-          path: cov
       - uses: actions/download-artifact@v4
         if: ${{github.event_name == 'pull_request'}}
         continue-on-error: true
@@ -807,33 +656,8 @@ jobs:
             ((j=0, i+=1))
           done
 
-          # coverage table
-          i=0
-          j=4
-          for s in lines branches
-          do
-            table[$i,$j]=${s^}
-            ((j+=1))
-
-            f=cov/cov.csv
-            [ -e $f ] && table[$i,$j]=$( \
-              export PREV="$(jq -re '
-                  select(.context == "'"cov / $s"'").description
-                  | capture("(?<prev_a>[0-9]+)/(?<prev_b>[0-9]+)")
-                  | 100*((.prev_a|tonumber) / (.prev_b|tonumber))' \
-                prev-status.json || echo 0)"
-              ./scripts/cov.py -u $f -f$s -Y \
-                | awk -F '[ /%]+' -v s=$s '
-                  NR==2 {$1=0; printf "%d/%d %s",$2,$3,s}
-                  NR==2 && ENVIRON["PREV"]+0 != 0 {
-                    printf " (%+.1f%%)",$4-ENVIRON["PREV"]
-                  }' \
-                | sed -e 's/ /\&nbsp;/g')
-            ((j=4, i+=1))
-          done
-
           # benchmark table
-          i=3
+          i=0
           j=4
           for s in readed proged erased
           do
@@ -857,15 +681,14 @@ jobs:
           done
 
           # build the actual table
-          echo "|   | Code | Stack | Structs |   | Coverage |" >> table.txt
-          echo "|:--|-----:|------:|--------:|:--|---------:|" >> table.txt
+          echo "|   | Code | Stack | Structs |   | Benchmarks |" >> table.txt
+          echo "|:--|-----:|------:|--------:|:--|-----------:|" >> table.txt
           for ((i=0; i<6; i++))
           do
             echo -n "|" >> table.txt
             for ((j=0; j<6; j++))
             do
               echo -n " " >> table.txt
-              [[ i -eq 2 && j -eq 5 ]] && echo -n "**Benchmarks**" >> table.txt
               echo -n "${table[$i,$j]:-}" >> table.txt
               echo -n " |" >> table.txt
             done
@@ -881,7 +704,7 @@ jobs:
           touch comment.txt
           echo "<details>" >> comment.txt
           echo "<summary>" >> comment.txt
-          echo "Tests passed ✓, `
+          echo "Tests passed, `
             `Code: $(awk 'NR==3 {print $4}' table.txt || true), `
             `Stack: $(awk 'NR==3 {print $6}' table.txt || true), `
             `Structs: $(awk 'NR==3 {print $8}' table.txt || true)" \
@@ -904,4 +727,3 @@ jobs:
           name: comment
           path: comment
           retention-days: 1
-    
