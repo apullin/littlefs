@@ -23,3 +23,9 @@ target_include_directories(app PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/..
     ${CMAKE_CURRENT_SOURCE_DIR}/../test
 )
+
+# Disable littlefs assertions for ztest (they cause kernel panics)
+# Use zassert instead for test assertions
+target_compile_definitions(app PRIVATE
+    LFS_NO_ASSERT
+)

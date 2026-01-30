@@ -7,13 +7,20 @@
 #define LFS_TEST_ZTEST
 
 #include <zephyr/ztest.h>
+#include <stdbool.h>
 #include <string.h>
 
 #include "lfs.h"
 #include "test/lfs_test_bd.h"
 
-static struct lfs_test_bd bd;
-static struct lfs_config cfg;
+/* Shared globals for all test suites */
+struct lfs_test_bd ztest_bd;
+struct lfs_config ztest_cfg;
+bool ztest_bd_initialized = false;
+
+/* Local aliases for bd_tests */
+#define bd ztest_bd
+#define cfg ztest_cfg
 
 static void *bd_suite_setup(void)
 {
