@@ -1,3 +1,8 @@
+> **Fork note:** This fork is a heavy refactor of the unit testing system,
+> replacing the Python/TOML test infrastructure with GoogleTest (host) and
+> Zephyr ztest (embedded/QEMU). See [README-mine.md](README-mine.md) for
+> details on the motivation and design.
+
 ## littlefs
 
 A little fail-safe filesystem designed for microcontrollers.
