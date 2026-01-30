@@ -52,6 +52,12 @@ add_executable(lfs_internal_tests
     test_compat.cpp
 )
 
+# lfs_test_internal.c #includes lfs.c directly and cannot include its own
+# header (type conflicts), so suppress the missing-prototypes warning.
+set_source_files_properties(lfs_test_internal.c PROPERTIES
+    COMPILE_FLAGS "-Wno-missing-prototypes"
+)
+
 target_link_libraries(lfs_internal_tests
     PRIVATE
     lfs_bd
